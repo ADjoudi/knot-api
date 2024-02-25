@@ -25,7 +25,7 @@ router.post("/signup", [
     }
     const users = await User.find({ email: req.body.email });
     if (users.length) {
-      res.json({ error: "Username Already exists" });
+      res.json({ error: "Email already in use" });
       return;
     }
     try {
