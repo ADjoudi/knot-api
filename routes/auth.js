@@ -14,23 +14,26 @@ router.post("/signup", [
   async function (req, res, next) {
     const errors = validationResult(req);
     const user = {
-      display_name: req.body.name,
+      display_name: req.body.display_name,
       email: req.body.email,
       password: req.body.password,
     };
 
     if (!errors.isEmpty()) {
+      res.status(500);
       res.json({ error: errors });
       return;
     }
     const users = await User.find({ email: req.body.email });
     if (users.length) {
+      res.status(500);
       res.json({ error: "Email already in use" });
       return;
     }
     try {
       bcrypt.hash(req.body.password, 10, async (err, hashedPassword) => {
         if (err) {
+          res.status(500);
           res.json({ error: "Server Error" });
           return;
         }
