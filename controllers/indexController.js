@@ -5,7 +5,6 @@ const { body, validationResult } = require("express-validator");
 const User = require("../models/User");
 const Message = require("../models/Message");
 const Invite = require("../models/Invite");
-const { options } = require("../routes");
 
 exports.user_info_get = asyncHandler(async function (req, res, next) {
   if (!req.user) {
@@ -75,34 +74,51 @@ exports.chat_message_post = [
 
 exports.invites_get = asyncHandler(async function (req, res, next) {
   if (!req.user) {
-    res.status(500).json({ error: "invalid inputs" });
-    return;
+    return res.status(400).json({ error: "invalid user" });
   }
 
-  const invites = await User.findById(req.user._id)
-    .select("invites")
-    .populate("invites")
-    .lean(true)
+  const invites = await Invite.find({ to: req.user._id })
+    .populate({ path: "from", select: "_id display_name" })
+    .lean()
     .exec();
 
-  res.json(invites);
+  const uniqueInvites = invites.filter(
+    (invite) => !req.user.contacts.includes(invite.from._id)
+  );
+
+  res.json(uniqueInvites);
 });
 
 exports.invite_send = asyncHandler(async function (req, res, next) {
   if (!req.user || !mongoose.isValidObjectId(req.params.contactID)) {
-    res.status(500).json({ error: "invalid inputs" });
-    return;
+    return res.status(400).json({ error: "invalid inputs" });
   }
 
-  const contact = await User.findById(req.params.contactID);
+  const existingInvite = await Invite.findOne({
+    from: req.user.id,
+    to: req.params.contactID,
+  })
+    .lean()
+    .exec();
 
-  const InviteModel = new Invite({
+  if (existingInvite)
+    return res.status(400).json({ error: "Invite already sent" });
+
+  const newInvite = new Invite({
     from: req.user.id,
     to: req.params.contactID,
   });
-  const invite = await InviteModel.save();
-  contact.invites.push(invite._id);
-  await contact.save();
+  const invite = await newInvite.save();
+
+  const contact = await User.findById(req.params.contactID);
+  if (contact) {
+    if (!contact.invites.includes(invite._id)) {
+      contact.invites.push(invite._id);
+      await contact.save();
+    }
+  } else {
+    return res.status(404).json({ error: "Recipient not found" });
+  }
 
   res.json({ success: true });
 });
@@ -121,17 +137,25 @@ exports.invite_accept = asyncHandler(async function (req, res, next) {
     res.status(500).json({ error: "server error" });
     return;
   }
-  user.contacts.push(invite.from);
-  contact.contacts.push(invite.to);
-  user.invites = user.invites.filter(
-    (userInvite) => !userInvite.equals(invite._id)
-  );
 
-  await Invite.deleteOne(invite);
-  await user.save();
-  await contact.save();
+  if (
+    !user.contacts.includes(invite.from) &&
+    !contact.contacts.includes(invite.to)
+  ) {
+    user.contacts.push(invite.from);
+    contact.contacts.push(invite.to);
 
-  res.json({ success: true });
+    user.invites = user.invites.filter(
+      (userInvite) => !userInvite.equals(invite._id)
+    );
+
+    await Invite.deleteOne(invite);
+    await user.save();
+    await contact.save();
+
+    res.json({ success: true });
+  }
+  res.sendStatus(500);
 });
 
 exports.invite_reject = asyncHandler(async function (req, res, next) {
@@ -155,4 +179,26 @@ exports.invite_reject = asyncHandler(async function (req, res, next) {
   await user.save();
 
   res.json({ success: true });
+});
+
+exports.contacts_list_get = asyncHandler(async function (req, res, next) {
+  const allUsers = await User.find()
+    .limit(10)
+    .select("_id display_name invites")
+    .populate({ path: "invites", select: "from" })
+    .lean()
+    .exec();
+
+  const contacts = allUsers.filter((user) => {
+    const exists = user.invites.filter((invite) =>
+      invite.from.equals(req.user._id)
+    );
+    return (
+      !req.user.contacts.includes(user._id) &&
+      exists.length === 0 &&
+      req.user._id.toString() !== user._id.toString()
+    );
+  });
+
+  res.json(contacts);
 });

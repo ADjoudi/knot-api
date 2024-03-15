@@ -3,6 +3,7 @@ const router = express.Router();
 const index_controller = require("../controllers/indexController");
 
 router.get("/", index_controller.user_info_get);
+router.get("/contacts", index_controller.contacts_list_get);
 
 router.get("/chat/:contactID", index_controller.chat_log_get);
 router.post("/chat/:contactID", index_controller.chat_message_post);
